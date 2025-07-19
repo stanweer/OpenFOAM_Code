@@ -55,6 +55,11 @@ IOdictionary transportProperties
 
 const scalar Ri = readScalar(transportProperties.lookup("Ri"));
 
+dimensionedScalar refL
+(
+    "refL",
+    transportProperties.lookup("refL")
+);
 dimensionedVector g
 (
     "g",
@@ -102,7 +107,7 @@ const instantList& timeDirs = timeSelector::select0(runTime,args);
      
 
 
-         volVectorField gradT("gradT",fvc::grad(T)/dT); 
+         volVectorField gradT("gradT",(refL/dT)*fvc::grad(T)); 
          volVectorField baroclinicVorticity("baroclinicVorticity",Ri*(gradT^g));    
          baroclinicVorticity.write();
       }
