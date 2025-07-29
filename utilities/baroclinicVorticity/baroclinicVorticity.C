@@ -39,82 +39,89 @@ int main(int argc, char *argv[])
     #include "createMesh.H"
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-    
-    
-IOdictionary transportProperties
-(
-    IOobject
+
+    IOdictionary transportProperties
     (
-        "transportProperties",
-         runTime.constant(),
-         mesh,
-         IOobject::MUST_READ_IF_MODIFIED,
-         IOobject::NO_WRITE
-     )
-);
+        IOobject
+        (
+            "transportProperties",
+            runTime.constant(),
+            mesh,
+            IOobject::MUST_READ_IF_MODIFIED,
+            IOobject::NO_WRITE
+        )
+    );
 
-const scalar Ri = readScalar(transportProperties.lookup("Ri"));
+    dimensionedScalar Ri
+    (
+        "Ri",
+        transportProperties.get<dimensionedScalar>("Ri")
+    );
 
-dimensionedScalar refL
-(
-    "refL",
-    transportProperties.lookup("refL")
-);
-dimensionedVector g
-(
-    "g",
-    transportProperties.lookup("g")
-);
+    dimensionedScalar refL
+    (
+        "refL",
+        transportProperties.get<dimensionedScalar>("refL")
+    );
 
-dimensionedScalar Tc
-(
-    "Tc",
-    transportProperties.lookup("Tc")
-);
+    dimensionedVector g
+    (
+        "g",
+        transportProperties.get<dimensionedVector>("g")
+    );
 
-dimensionedScalar Th
-(
-    "Th",
-    transportProperties.lookup("Th")
-);
+    dimensionedScalar Tc
+    (
+        "Tc",
+        transportProperties.get<dimensionedScalar>("Tc")
+    );
 
-dimensionedScalar dT = Th - Tc;
-    
-//select time directories starting with 0.
-const instantList& timeDirs = timeSelector::select0(runTime,args);
+    dimensionedScalar Th
+    (
+        "Th",
+        transportProperties.get<dimensionedScalar>("Th")
+    );
 
-    forAll (timeDirs,timeI)
-     {   
-        //set the time to the value of current time directory.
-        runTime.setTime(timeDirs[timeI],timeI);
-        Info << "Time" << runTime.timeName() <<endl;
+    dimensionedScalar dT("dT", Th - Tc);
 
+    // Select time directories starting with 0
+    instantList timeDirs = timeSelector::select0(runTime, args);
 
-        //Read the temperature field.
+    forAll(timeDirs, timeI)
+    {
+        runTime.setTime(timeDirs[timeI], timeI);
+        Info << "Time = " << runTime.timeName() << endl;
+
+   
+        Info << "Reading field T" << endl;
         volScalarField T
         (
-             IOobject
-             (  
-                 "T",
-                 runTime.timeName(),
-                 mesh,
-                 IOobject::MUST_READ,
-                 IOobject::AUTO_WRITE
-              ),
-              mesh
-         );
-      
-     
+            IOobject
+            (
+                "T",
+                runTime.timeName(),
+                mesh,
+                IOobject::MUST_READ,
+                IOobject::NO_WRITE 
+            ),
+            mesh
+        );
 
+        // Calculate normalized temperature gradient
+        volVectorField gradT ("gradT", (refL / dT) * fvc::grad(T));
+        
 
-         volVectorField gradT("gradT",(refL/dT)*fvc::grad(T)); 
-         volVectorField baroclinicVorticity("baroclinicVorticity",Ri*(gradT^g));    
-         baroclinicVorticity.write();
-      }
+        // Calculate baroclinic vorticity: Ri * (gradT ^ g)
+        volVectorField baroclinicVorticity ("baroclinicVorticity",  Ri * (gradT ^ g));
+        baroclinicVorticity.write();
 
-    Info<< "\nEnd\n" << endl;
+        // Clear large fields to free memory
+        gradT.clear();
+        T.clear();
+    }
+
+    Info << "\nEnd\n" << endl;
     return 0;
 }
-
 
 // ************************************************************************* //
