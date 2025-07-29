@@ -39,64 +39,77 @@ int main(int argc, char *argv[])
     #include "createMesh.H"
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-    
-//select time directories starting with 0.
-const instantList& timeDirs = timeSelector::select0(runTime,args);
 
-     forAll (timeDirs,timeI)
-     {   
-        //set the time to the value of current time directory.
-        runTime.setTime(timeDirs[timeI],timeI);
-        Info << "Time" << runTime.timeName() <<endl;
+    // Select time directories starting with 0
+    instantList timeDirs = timeSelector::select0(runTime, args);
 
-       //Read the U field.
+    forAll(timeDirs, timeI)
+    {
+        runTime.setTime(timeDirs[timeI], timeI);
+        Info << "Time = " << runTime.timeName() << endl;
+
+
+        Info << "Reading field U" << endl;
         volVectorField U
         (
             IOobject
             (
-                "U",                
-                 runTime.timeName(),
-                 mesh,
-                 IOobject::MUST_READ,
-                 IOobject::AUTO_WRITE
-             ),
-             mesh
-         );
-         
-         
-        volSymmTensorField strainRate("strainRate",symm(fvc::grad(U)));
-        
+                "U",
+                runTime.timeName(),
+                mesh,
+                IOobject::MUST_READ,
+                IOobject::NO_WRITE 
+            ),
+            mesh
+        );
+
+        // Calculate strain rate tensor
+        volSymmTensorField strainRate
+        (
+            IOobject
+            (
+                "strainRate",
+                runTime.timeName(),
+                mesh,
+                IOobject::NO_READ,
+                IOobject::NO_WRITE // Temporary field, no need to write
+            ),
+            symm(fvc::grad(U))
+        );
+
+        // Initialize eigenvalue field
         volVectorField EigStrainRate
         (
             IOobject
             (
-                 "EigStrainRate",
-                 runTime.timeName(),
-                 mesh,
-                 IOobject::NO_READ,
-                 IOobject::AUTO_WRITE
-             ),
-             mesh,
-             dimensionedVector("EigStrainRate",strainRate.dimensions(), Zero),
-             "zeroGradient"
-         );
+                "EigStrainRate",
+                runTime.timeName(),
+                mesh,
+                IOobject::NO_READ,
+                IOobject::AUTO_WRITE
+            ),
+            mesh,
+            dimensionedVector("EigStrainRate", strainRate.dimensions(), Zero),
+            "zeroGradient"
+        );
 
 
-         
-         forAll(strainRate.internalField(),cellI)
-         {  
-              EigStrainRate[cellI] = eigenValues(strainRate.internalField()[cellI]);
-         }
-         
-        // strainRate.write();
-         EigStrainRate.write();
+        forAll(strainRate, cellI)
+        {
+            EigStrainRate[cellI] = eigenValues(strainRate[cellI]);
+        }
 
-      }
-                   
+        // Apply boundary conditions
+        EigStrainRate.correctBoundaryConditions();
+        EigStrainRate.write();
 
-    Info<< "\nEnd\n" << endl;
+        // Explicitly clear large fields to free memory
+        strainRate.clear();
+        U.clear();
+    }
+
+    Info << "\nEnd\n" << endl;
     return 0;
 }
-
 
 // ************************************************************************* //
