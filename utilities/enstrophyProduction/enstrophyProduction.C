@@ -36,6 +36,20 @@ int main(int argc, char *argv[])
     #include "setRootCaseLists.H"
     #include "createTime.H"
     #include "createMesh.H"
+    
+    IOdictionary EnstrophyDict
+    (
+        IOobject
+        (
+            "EnstrophyDict",
+            runTime.constant(),
+            mesh,
+            IOobject::MUST_READ_IF_MODIFIED,
+            IOobject::NO_WRITE
+        )
+    );
+    
+    word fieldName(EnstrophyDict.get<word>("fieldName"));
 
     const instantList& timeDirs = timeSelector::select0(runTime, args);
 
@@ -45,11 +59,11 @@ int main(int argc, char *argv[])
         Info<< "Time = " << runTime.timeName() << endl;
    
         Info<< "Reading field U\n" << endl;
-        volVectorField U
+        volVectorField velocity
         (
             IOobject
             (
-                "U",
+                fieldName,
                 runTime.timeName(),
                 mesh,
                 IOobject::MUST_READ,
@@ -59,7 +73,7 @@ int main(int argc, char *argv[])
         );
   
         // Calculate enstrophy production: ω·(S·ω) where ω is vorticity and S is strain rate
-        volScalarField EnstrophyProduction("EnstrophyProduction", fvc::curl(U) & symm(fvc::grad(U)) & fvc::curl(U));
+        volScalarField EnstrophyProduction("EnstrophyProduction_" + fieldName, (fvc::curl(velocity) & symm(fvc::grad(velocity))) & fvc::curl(velocity));
         EnstrophyProduction.write();
        
     }
