@@ -22,11 +22,9 @@ License
     along with OpenFOAM.  If not, see <http://www.gnu.org/licenses/>.
 
 Application
-    First extract cells using toposet then access selected cells.
-    Calculate fields at selected cells.
-
-Description
-
+    fieldName       U;          // Name of the field to filter
+    filterRegion    mySet;     // Name of the cellSet to process
+    filterWidth     0.1; 
 \*---------------------------------------------------------------------------*/
 
 #include "fvCFD.H"
@@ -45,7 +43,7 @@ int main(int argc, char *argv[])
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-
+// Read filter properties from constant/filterProperties dictionary
 IOdictionary filterProperties
 (
     IOobject
@@ -58,96 +56,111 @@ IOdictionary filterProperties
     )
 );
 
-const scalar delta = readScalar(filterProperties.lookup("filterWidth"));
-const scalar beta = readScalar(filterProperties.lookup("decayRate")); //decay rate for Gaussian filter
-const scalar radius = delta / 2.0;
+const word fieldName(filterProperties.lookup("fieldName"));    // Field to filter
+const word filterRegion(filterProperties.lookup("filterRegion"));  // cellSet region to apply filter
+const scalar delta = readScalar(filterProperties.lookup("filterWidth"));    // Filter width
+
+ // Precompute constants for Gaussian filter
+const scalar deltaSqr = sqr(delta);
+const scalar radius = 2.0 * delta / Foam::sqrt(12.0);  //2 sigma (95%)
 const scalar radiusSqr = sqr(radius);
-const vector rVec(radius, radius, radius);
+const vector radiusVec(radius, radius, radius);
+const scalar coeff = -6.0 / deltaSqr;
 
 
 const pointField& cellCenters = mesh.C();
 const scalarField& cellVolumes = mesh.V();
-const indexedOctree<treeDataCell>& cellTree = mesh.cellTree();
+const indexedOctree<treeDataCell>& cellTree = mesh.cellTree();   // Octree for neighbor search
 
-
-const cellSet myCellSet(mesh,"filteredCellSet");
-const labelList& cellsToFilter = myCellSet.toc();
+// Get cells where filtering will be applied
+const cellSet filterCellSet(mesh,filterRegion);
+const labelList& cellsToFilter = filterCellSet.toc();
 
 
 const instantList& timeDirs = timeSelector::select0(runTime,args);
 
 forAll (timeDirs,timeI)
      {   
-        //set the time to the value of current time directory.
+     
         runTime.setTime(timeDirs[timeI],timeI);
         Info << "Time = " << runTime.timeName() <<endl;
 
        
-        volVectorField U
+        volVectorField originalField
         (
             IOobject
             (  
-                "U",
+                fieldName,
                 runTime.timeName(),
                 mesh,
                 IOobject::MUST_READ,
-                IOobject::AUTO_WRITE
+                IOobject::NO_WRITE
             ),
             mesh
         );
         
+        Info << "Filtering field: " << originalField.name() <<endl;
         
-        volVectorField filteredU
+        volVectorField filteredField
         (
             IOobject
             (
-                "filteredU",
+                "filteredField",
                  runTime.timeName(),
                  mesh,
                  IOobject::NO_READ,
                  IOobject::AUTO_WRITE
             ),
             mesh,
-            dimensionedVector("filteredU", U.dimensions(), vector::zero)
+            dimensionedVector("filteredField", originalField.dimensions(), vector::zero)
          );
 
 
-         
+
+           
+           // Loop over all cells in the filter region
            forAll(cellsToFilter, i)
            {
            	const label cellI = cellsToFilter[i];
                 const point& centre = cellCenters[cellI];
-                const boundBox box(centre - rVec, centre + rVec);
+                
+                // Define search box around the current cell
+                const boundBox box(centre - radiusVec, centre + radiusVec);
                 const treeBoundBox searchBox(box);
+                
+                // Find neighboring cells inside the search box using octree
                 const labelList nearCells = cellTree.findBox(searchBox);
                 
-                vector sumPhiVol = vector::zero;
-                scalar sumVol = 0.0;
                 
-                for (label neighborCellI : nearCells)
+                vector sumPhiVol = vector::zero;   // Weighted sum of field values
+                scalar sumVol = 0.0;              // Sum of weights (normalization)
+                
+                //for (label neighborCellI : nearCells)
+                // Loop over neighboring cells
+                forAll(nearCells, n)
                 {
+                    const label neighborCellI = nearCells[n];
                     const scalar distSqr = magSqr(cellCenters[neighborCellI] - centre);
                     
-                    if (distSqr <= radiusSqr)
+                    if (distSqr <= radiusSqr)  // Check if inside filter radius
                     {                                             
-                       const scalar rSqr = distSqr/radiusSqr;
-                       const scalar weight = Foam::exp(-beta*rSqr) * cellVolumes[neighborCellI];
-                       sumPhiVol += U[neighborCellI] * weight;
+                       const scalar weight = Foam::exp(coeff*distSqr) * cellVolumes[neighborCellI];
+                       sumPhiVol += originalField[neighborCellI] * weight;
                        sumVol += weight;
                     }
                 }
          
 		if (sumVol > VSMALL)
                 {
-                    filteredU[cellI] = sumPhiVol / sumVol;
+                    filteredField[cellI] = sumPhiVol / sumVol;
                 }
                 
-                Info << "cell number = " << i << endl;
+                if (i % 10000 == 0) Info << "Processed cell " << i << endl;
            }
            
-           filteredU.boundaryFieldRef() = U.boundaryField();
-           filteredU.correctBoundaryConditions();
-           filteredU.write();
+           filteredField.boundaryFieldRef() = originalField.boundaryField();
+           filteredField.correctBoundaryConditions();
+           filteredField.write();
 	}
         Info<< "\nEnd\n" << endl;
 	return 0;
